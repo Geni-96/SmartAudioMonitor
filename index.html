@@ -199,6 +199,7 @@
         </div>
     </div>
 
+    <script src="SmartVoiceRecorder.js"></script>
     <script>
         // DOM Elements
         const startBtn = document.getElementById('startBtn');
@@ -213,276 +214,121 @@
         const totalDurationDisplay = document.getElementById('totalDuration');
         const currentDurationDisplay = document.getElementById('currentDuration');
         const recordingsContainer = document.getElementById('recordings');
-        
-        // Settings elements
         const voiceThresholdInput = document.getElementById('voiceThreshold');
         const silenceDurationInput = document.getElementById('silenceDuration');
         const minRecordingDurationInput = document.getElementById('minRecordingDuration');
 
-        // Global variables
-        let audioContext;
-        let analyser;
-        let microphone;
-        let frequencyData;
-        let mediaRecorder;
-        let audioChunks = [];
-        let isRecording = false;
-        let isMonitoring = false;
-        let silenceStart = null;
-        let totalRecordingTime = 0;
-        let currentRecordingStartTime = 0;
+        let recorder = null;
         let updateTimer;
         let recordingCounter = 0;
-        let stream;
-        
-        // Format time display (HH:MM:SS)
+        let totalRecordingTime = 0;
+
         function formatTime(milliseconds) {
             const totalSeconds = Math.floor(milliseconds / 1000);
             const hours = Math.floor(totalSeconds / 3600);
             const minutes = Math.floor((totalSeconds % 3600) / 60);
             const seconds = totalSeconds % 60;
-            
-            return [
-                hours.toString().padStart(2, '0'),
-                minutes.toString().padStart(2, '0'),
-                seconds.toString().padStart(2, '0')
-            ].join(':');
+            return [hours, minutes, seconds].map(x => x.toString().padStart(2, '0')).join(':');
         }
 
-        // Update duration displays
         function updateDurations() {
-            // Update total duration
             totalDurationDisplay.textContent = `Total: ${formatTime(totalRecordingTime)}`;
-            
-            // Update current clip duration if recording
-            if (isRecording) {
-                const currentDuration = Date.now() - currentRecordingStartTime;
-                currentDurationDisplay.textContent = `Current: ${formatTime(currentDuration)}`;
-            } else {
+            if (!recorder || !recorder.isRecording) {
                 currentDurationDisplay.textContent = 'Current: 00:00:00';
             }
         }
 
-        // Calculate energy in specific frequency range
-        function computeFrequencyEnergy(frequencyData, minFreq, maxFreq, sampleRate) {
-            const binSize = sampleRate / analyser.fftSize;
-            const minBin = Math.floor(minFreq / binSize);
-            const maxBin = Math.min(Math.ceil(maxFreq / binSize), frequencyData.length - 1);
-            
-            let sum = 0;
-            for (let i = minBin; i <= maxBin; i++) {
-                sum += frequencyData[i];
-            }
-            
-            // Normalize and convert to dB-like scale
-            const numBins = maxBin - minBin + 1;
-            return numBins > 0 ? (sum / numBins) : 0;
-        }
-
-        // Save recording and add to page
         function saveRecording(chunks, duration) {
             if (chunks.length === 0) return;
-            
             const blob = new Blob(chunks, { type: 'audio/webm' });
             const url = URL.createObjectURL(blob);
             const recordingNumber = ++recordingCounter;
-            
             const recordingItem = document.createElement('div');
             recordingItem.className = 'recording-item';
-            
             const header = document.createElement('h4');
             header.textContent = `Recording #${recordingNumber} (${formatTime(duration)})`;
-            
             const audio = document.createElement('audio');
             audio.controls = true;
             audio.src = url;
-            
             const downloadLink = document.createElement('a');
             downloadLink.href = url;
             downloadLink.download = `recording-${recordingNumber}.webm`;
             downloadLink.textContent = 'Download';
             downloadLink.style.marginLeft = '10px';
-            
             recordingItem.appendChild(header);
             recordingItem.appendChild(audio);
             recordingItem.appendChild(downloadLink);
-            
             if (recordingsContainer.querySelector('p')) {
                 recordingsContainer.innerHTML = '';
             }
-            
             recordingsContainer.prepend(recordingItem);
             clearBtn.disabled = false;
         }
 
-        // Start a new recording
-        function startRecording() {
-            if (isRecording) return;
-            
-            audioChunks = [];
-            mediaRecorder.start();
-            isRecording = true;
-            currentRecordingStartTime = Date.now();
-            recordingStatus.style.display = 'block';
-            silentStatus.style.display = 'none';
-            console.log('Started recording');
-        }
-
-        // Stop the current recording
-        function stopRecording() {
-            if (!isRecording) return;
-            
-            mediaRecorder.stop();
-            isRecording = false;
-            recordingStatus.style.display = 'none';
-            silentStatus.style.display = 'block';
-            console.log('Stopped recording');
-        }
-
-        // Start monitoring audio
         async function startMonitoring() {
             try {
-                // Request microphone access
-                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                
-                // Set up Web Audio API
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                analyser = audioContext.createAnalyser();
-                analyser.fftSize = 1024;
-                
-                microphone = audioContext.createMediaStreamSource(stream);
-                microphone.connect(analyser);
-                
-                frequencyData = new Uint8Array(analyser.frequencyBinCount);
-                
-                // Initialize recorder
-                mediaRecorder = new MediaRecorder(stream);
-                
-                // Set up recording event handlers
-                mediaRecorder.ondataavailable = (event) => {
-                    if (event.data.size > 0) {
-                        audioChunks.push(event.data);
-                    }
-                };
-                
-                mediaRecorder.onstop = () => {
-                    const recordingDuration = Date.now() - currentRecordingStartTime;
-                    const minDuration = parseInt(minRecordingDurationInput.value);
-                    
-                    if (recordingDuration >= minDuration) {
-                        totalRecordingTime += recordingDuration;
-                        saveRecording(audioChunks, recordingDuration);
-                    }
-                    
-                    // Reset for next recording (but chunks are cleared in startRecording)
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                recorder = new SmartVoiceRecorder(stream, {
+                    voiceThreshold: parseInt(voiceThresholdInput.value),
+                    silenceDuration: parseInt(silenceDurationInput.value),
+                    minRecordingDuration: parseInt(minRecordingDurationInput.value)
+                });
+                recorder.on('audioProcess', ({ rawLevel, speechLevel }) => {
+                    rawMeterFill.style.width = `${Math.min(100, rawLevel * 2)}%`;
+                    rawLevelDisplay.textContent = `${Math.round(rawLevel)} dB`;
+                    meterFill.style.width = `${Math.min(100, speechLevel * 2)}%`;
+                    voiceLevelDisplay.textContent = `${Math.round(speechLevel)} dB`;
+                });
+                recorder.on('recordingStarted', () => {
+                    recordingStatus.style.display = 'block';
+                    silentStatus.style.display = 'none';
+                    const startTime = Date.now();
+                    const updateCurrentDuration = () => {
+                        if (recorder && recorder.isRecording) {
+                            const currentDuration = Date.now() - startTime;
+                            currentDurationDisplay.textContent = `Current: ${formatTime(currentDuration)}`;
+                            requestAnimationFrame(updateCurrentDuration);
+                        }
+                    };
+                    updateCurrentDuration();
+                });
+                recorder.on('recordingStopped', () => {
+                    recordingStatus.style.display = 'none';
+                    silentStatus.style.display = 'block';
+                });
+                recorder.on('recordingComplete', ({ chunks, duration }) => {
+                    totalRecordingTime += duration;
+                    saveRecording(chunks, duration);
                     updateDurations();
-                };
-                
-                // Start interface
-                isMonitoring = true;
+                });
+                recorder.startMonitoring();
                 silentStatus.style.display = 'block';
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
-                
-                // Start update timer
                 updateTimer = setInterval(updateDurations, 100);
-                
-                // Start audio analysis
-                requestAnimationFrame(analyzeAudio);
-                
             } catch (error) {
                 console.error('Error accessing microphone:', error);
                 alert('Error accessing microphone: ' + error.message);
             }
         }
 
-        // Stop monitoring audio
         function stopMonitoring() {
-            if (!isMonitoring) return;
-            
-            if (isRecording) {
-                stopRecording();
-            }
-            
+            if (!recorder) return;
             clearInterval(updateTimer);
-            
-            // Reset UI
+            recorder.stopMonitoring();
+            recorder = null;
             recordingStatus.style.display = 'none';
             silentStatus.style.display = 'none';
             startBtn.disabled = false;
             stopBtn.disabled = true;
-            
-            // Close audio connections
-            if (microphone) {
-                microphone.disconnect();
-            }
-            
-            if (audioContext) {
-                audioContext.close();
-            }
-            
-            // Stop the stream tracks
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-            }
-            
-            isMonitoring = false;
+            rawMeterFill.style.width = '0%';
+            meterFill.style.width = '0%';
+            rawLevelDisplay.textContent = '0 dB';
+            voiceLevelDisplay.textContent = '0 dB';
         }
 
-        // Analyze audio and detect voice
-        function analyzeAudio() {
-            if (!isMonitoring || !analyser) return;
-            
-            analyser.getByteFrequencyData(frequencyData);
-            const sampleRate = audioContext.sampleRate;
-            
-            // Calculate raw audio level (full frequency spectrum)
-            const rawAudioLevel = computeFrequencyEnergy(frequencyData, 0, sampleRate / 2, sampleRate);
-            
-            // Calculate voice-specific energy (focused on speech frequencies)
-            const speechEnergy = computeFrequencyEnergy(frequencyData, 85, 4000, sampleRate);
-            
-            // Get thresholds from settings
-            const voiceThreshold = parseInt(voiceThresholdInput.value);
-            const silenceDurationMs = parseInt(silenceDurationInput.value);
-
-            // Update meters and displays
-            rawMeterFill.style.width = `${Math.min(100, rawAudioLevel * 2)}%`;
-            rawLevelDisplay.textContent = `${Math.round(rawAudioLevel)} dB`;
-            
-            meterFill.style.width = `${Math.min(100, speechEnergy * 2)}%`;
-            voiceLevelDisplay.textContent = `${Math.round(speechEnergy)} dB`;
-            
-            // Voice detection logic
-            if (speechEnergy < voiceThreshold) {
-                // If we're below threshold (silence detected)
-                if (silenceStart === null) {
-                    // Mark the start of silence
-                    silenceStart = performance.now();
-                }
-                
-                // If we've been silent long enough and are recording
-                if (isRecording && (performance.now() - silenceStart > silenceDurationMs)) {
-                    stopRecording();
-                }
-            } else {
-                // Above threshold (voice detected)
-                silenceStart = null;
-                
-                // If not already recording, start a new recording
-                if (!isRecording) {
-                    startRecording();
-                }
-            }
-            
-            // Continue the analysis
-            requestAnimationFrame(analyzeAudio);
-        }
-
-        // Event listeners
         startBtn.addEventListener('click', startMonitoring);
         stopBtn.addEventListener('click', stopMonitoring);
-        
         clearBtn.addEventListener('click', () => {
             recordingsContainer.innerHTML = '<p>No recordings yet. Start monitoring and speak to create recordings.</p>';
             recordingCounter = 0;
@@ -490,6 +336,16 @@
             updateDurations();
             clearBtn.disabled = true;
         });
+        function updateRecorderSettings() {
+            if (recorder) {
+                recorder.options.voiceThreshold = parseInt(voiceThresholdInput.value);
+                recorder.options.silenceDuration = parseInt(silenceDurationInput.value);
+                recorder.options.minRecordingDuration = parseInt(minRecordingDurationInput.value);
+            }
+        }
+        voiceThresholdInput.addEventListener('change', updateRecorderSettings);
+        silenceDurationInput.addEventListener('change', updateRecorderSettings);
+        minRecordingDurationInput.addEventListener('change', updateRecorderSettings);
     </script>
 </body>
 </html>
