@@ -155,6 +155,7 @@
             </div>
             <div>
                 <button id="clearBtn" disabled>Clear Recordings</button>
+                <button id="showDbBtn">Show DB Recordings</button>
             </div>
         </div>
         
@@ -205,6 +206,7 @@
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const clearBtn = document.getElementById('clearBtn');
+        const showDbBtn = document.getElementById('showDbBtn');
         const rawMeterFill = document.getElementById('rawMeterFill');
         const meterFill = document.getElementById('meterFill');
         const rawLevelDisplay = document.getElementById('rawLevel');
@@ -296,10 +298,19 @@
                     recordingStatus.style.display = 'none';
                     silentStatus.style.display = 'block';
                 });
-                recorder.on('recordingComplete', ({ chunks, duration }) => {
+                recorder.on('recordingComplete', async ({ chunks, duration, timestamp }) => {
                     totalRecordingTime += duration;
                     saveRecording(chunks, duration);
                     updateDurations();
+                    if (recorder && typeof recorder.storeChunkInDB === 'function') {
+                        await recorder.storeChunkInDB({
+                            chunks,
+                            duration,
+                            timestamp,
+                            done: true,
+                            sent: false
+                        });
+                    }
                 });
                 recorder.startMonitoring();
                 silentStatus.style.display = 'block';
@@ -327,9 +338,20 @@
             voiceLevelDisplay.textContent = '0 dB';
         }
 
+        // Helper to render DB recordings
+        async function renderDbRecordings() {
+            const dbRecordings = await SmartVoiceRecorder.getRecordingsFromDB();
+            console.log('IndexedDB Recordings:', dbRecordings);
+        }
+
+        showDbBtn.addEventListener('click', renderDbRecordings);
+
         startBtn.addEventListener('click', startMonitoring);
         stopBtn.addEventListener('click', stopMonitoring);
-        clearBtn.addEventListener('click', () => {
+        clearBtn.addEventListener('click', async () => {
+            // Delete all from IndexedDB using static helper
+            const dbRecordings = await SmartVoiceRecorder.getRecordingsFromDB();
+            await Promise.all(dbRecordings.map(r => SmartVoiceRecorder.deleteRecordingFromDB(r.id)));
             recordingsContainer.innerHTML = '<p>No recordings yet. Start monitoring and speak to create recordings.</p>';
             recordingCounter = 0;
             totalRecordingTime = 0;

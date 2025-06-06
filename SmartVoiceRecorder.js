@@ -19,6 +19,11 @@ class SmartVoiceRecorder {
     this.currentRecordingStartTime = 0;
     this.totalRecordingTime = 0;
     this.eventListeners = {};
+    this.dbName = 'audioChunksDB';
+    this.objectStoreName = 'audioChunks';
+    this.db = null;
+    // Always initialize IndexedDB immediately
+    this.initDB();
     if (this.stream) {
       this._initAudio();
     }
@@ -141,6 +146,102 @@ class SmartVoiceRecorder {
     if (this.eventListeners[event]) {
       this.eventListeners[event].forEach(callback => callback(data));
     }
+  }
+
+  async initDB() {
+    this.dbName = 'audioChunksDB';
+    this.objectStoreName = 'audioChunks';
+    this.db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, 1);
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains(this.objectStoreName)) {
+          const objectStore = db.createObjectStore(this.objectStoreName, { keyPath: 'id', autoIncrement: true });
+          objectStore.createIndex('sent', 'sent', { unique: false });
+          objectStore.createIndex('done', 'done', { unique: false });
+        }
+      };
+      request.onsuccess = (event) => resolve(event.target.result);
+      request.onerror = (event) => reject(event.target.error);
+    });
+  }
+
+  async storeChunkInDB(data) {
+    // DB is always initialized in constructor
+    // Check if the recording is silent (all chunks are all zeros)
+    let hasAudio = false;
+    if (data.chunks && data.chunks.length > 0) {
+      for (let i = 0; i < data.chunks.length; i++) {
+        const arrBuf = await data.chunks[i].arrayBuffer();
+        const arr = new Uint8Array(arrBuf);
+        if (arr.some(b => b !== 0)) {
+          hasAudio = true;
+          break;
+        }
+      }
+    }
+    if (!hasAudio) {
+      // Discard silent recording
+      return;
+    }
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(this.objectStoreName, 'readwrite');
+      const store = transaction.objectStore(this.objectStoreName);
+      const request = store.add(data);
+      request.onsuccess = () => resolve();
+      request.onerror = (event) => reject(event.target.error);
+    });
+  }
+
+  // --- Static DB-only helpers ---
+  static async getRecordingsFromDB() {
+    const dbName = 'audioChunksDB';
+    const objectStoreName = 'audioChunks';
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open(dbName, 1);
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains(objectStoreName)) {
+          const objectStore = db.createObjectStore(objectStoreName, { keyPath: 'id', autoIncrement: true });
+          objectStore.createIndex('sent', 'sent', { unique: false });
+          objectStore.createIndex('done', 'done', { unique: false });
+        }
+      };
+      request.onsuccess = (event) => resolve(event.target.result);
+      request.onerror = (event) => reject(event.target.error);
+    });
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(objectStoreName, 'readonly');
+      const store = transaction.objectStore(objectStoreName);
+      const request = store.getAll();
+      request.onsuccess = (event) => resolve(event.target.result);
+      request.onerror = (event) => reject(event.target.error);
+    });
+  }
+
+  static async deleteRecordingFromDB(id) {
+    const dbName = 'audioChunksDB';
+    const objectStoreName = 'audioChunks';
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open(dbName, 1);
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains(objectStoreName)) {
+          const objectStore = db.createObjectStore(objectStoreName, { keyPath: 'id', autoIncrement: true });
+          objectStore.createIndex('sent', 'sent', { unique: false });
+          objectStore.createIndex('done', 'done', { unique: false });
+        }
+      };
+      request.onsuccess = (event) => resolve(event.target.result);
+      request.onerror = (event) => reject(event.target.error);
+    });
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(objectStoreName, 'readwrite');
+      const store = transaction.objectStore(objectStoreName);
+      const request = store.delete(id);
+      request.onsuccess = () => resolve();
+      request.onerror = (event) => reject(event.target.error);
+    });
   }
 
   dispose() {
