@@ -302,15 +302,6 @@
                     totalRecordingTime += duration;
                     saveRecording(chunks, duration);
                     updateDurations();
-                    if (recorder && typeof recorder.storeChunkInDB === 'function') {
-                        await recorder.storeChunkInDB({
-                            chunks,
-                            duration,
-                            timestamp,
-                            done: true,
-                            sent: false
-                        });
-                    }
                 });
                 recorder.startMonitoring();
                 silentStatus.style.display = 'block';

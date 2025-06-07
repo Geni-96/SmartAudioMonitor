@@ -41,8 +41,21 @@ class SmartVoiceRecorder {
   }
 
   _setupRecorderEvents() {
-    this.mediaRecorder.ondataavailable = (event) => {
+    this.mediaRecorder.ondataavailable = async (event) => {
       if (event.data.size > 0) {
+        // Check if the chunk is non-silent before storing
+        const arrBuf = await event.data.arrayBuffer();
+        const arr = new Uint8Array(arrBuf);
+        if (arr.some(b => b !== 0)) {
+          const chunkData = {
+            chunk: event.data,
+            timestamp: Date.now(),
+            done: false,
+            sent: false
+          };
+          await this.storeChunkInDB(chunkData);
+          this.emit('chunkStored', chunkData);
+        }
         this.audioChunks.push(event.data);
       }
     };
@@ -50,11 +63,14 @@ class SmartVoiceRecorder {
       const duration = Date.now() - this.currentRecordingStartTime;
       if (duration >= this.options.minRecordingDuration) {
         this.totalRecordingTime += duration;
-        this.emit('recordingComplete', {
+        const recordingData = {
           chunks: [...this.audioChunks],
           duration,
-          timestamp: Date.now()
-        });
+          timestamp: Date.now(),
+          done: true,
+          sent: false
+        };
+        this.emit('recordingComplete', recordingData);
       }
     };
   }
@@ -90,7 +106,7 @@ class SmartVoiceRecorder {
   startRecording() {
     if (this.isRecording) return;
     this.audioChunks = [];
-    this.mediaRecorder.start();
+    this.mediaRecorder.start(); // Start with 1s timeslice for continuous chunking
     this.isRecording = true;
     this.currentRecordingStartTime = Date.now();
     this.emit('recordingStarted');
@@ -168,22 +184,6 @@ class SmartVoiceRecorder {
 
   async storeChunkInDB(data) {
     // DB is always initialized in constructor
-    // Check if the recording is silent (all chunks are all zeros)
-    let hasAudio = false;
-    if (data.chunks && data.chunks.length > 0) {
-      for (let i = 0; i < data.chunks.length; i++) {
-        const arrBuf = await data.chunks[i].arrayBuffer();
-        const arr = new Uint8Array(arrBuf);
-        if (arr.some(b => b !== 0)) {
-          hasAudio = true;
-          break;
-        }
-      }
-    }
-    if (!hasAudio) {
-      // Discard silent recording
-      return;
-    }
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(this.objectStoreName, 'readwrite');
       const store = transaction.objectStore(this.objectStoreName);
@@ -249,3 +249,5 @@ class SmartVoiceRecorder {
     this.eventListeners = {};
   }
 }
+
+export default SmartVoiceRecorder;

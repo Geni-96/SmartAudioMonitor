@@ -1,0 +1,29 @@
+{
+  "name": "smartaudiomonitor",
+  "version": "1.0.0",
+  "description": "Smart Audio Monitor is an intelligent audio recording app designed to make capturing conversations, meetings, and key audio moments seamless and efficient. Instead of recording everything continuously, this app only records audio when it matters — when sound is detected above a set decibel threshold — and automatically stops during silence.",
+  "main": "SmartVoiceRecorder.js",
+  "files": [
+    "SmartVoiceRecorder.js"
+  ],
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Geni-96/SmartAudioMonitor.git"
+  },
+  "keywords": [
+    "audio",
+    "recorder",
+    "voice",
+    "silence-detection",
+    "indexeddb"
+  ],
+  "author": "Geni-96",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Geni-96/SmartAudioMonitor/issues"
+  },
+  "homepage": "https://github.com/Geni-96/SmartAudioMonitor#readme"
+}
